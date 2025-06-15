@@ -174,36 +174,61 @@ class AnthropicProvider(AIProvider):
 class GoogleProvider(AIProvider):
     """Google Gemini provider implementation."""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
         self.api_key = api_key
+        self.model = model
+        
+        # Fallback models in order of preference
+        self.fallback_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-1.0-pro",
+            "models/gemini-pro"  # Legacy model name as last resort
+        ]
     
     async def chat_completion(self, messages: List[ChatMessage], **kwargs) -> str:
         """Get chat completion from Google Gemini."""
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel('gemini-pro')
             
-            # Format conversation for Gemini
-            prompt = ""
-            for msg in messages:
-                if msg.role == "system":
-                    prompt += f"System: {msg.content}\n\n"
-                elif msg.role == "user":
-                    prompt += f"User: {msg.content}\n\n"
-                elif msg.role == "assistant":
-                    prompt += f"Assistant: {msg.content}\n\n"
+            # Try primary model first, then fallbacks
+            models_to_try = [self.model] + [m for m in self.fallback_models if m != self.model]
             
-            response = await asyncio.to_thread(
-                model.generate_content,
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=kwargs.get("max_tokens", 2000),
-                    temperature=kwargs.get("temperature", 0.7)
-                )
-            )
+            last_error = None
+            for model_name in models_to_try:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    
+                    # Format conversation for Gemini
+                    prompt = ""
+                    for msg in messages:
+                        if msg.role == "system":
+                            prompt += f"System: {msg.content}\n\n"
+                        elif msg.role == "user":
+                            prompt += f"User: {msg.content}\n\n"
+                        elif msg.role == "assistant":
+                            prompt += f"Assistant: {msg.content}\n\n"
+                    
+                    response = await asyncio.to_thread(
+                        model.generate_content,
+                        prompt,
+                        generation_config=genai.types.GenerationConfig(
+                            max_output_tokens=kwargs.get("max_tokens", 2000),
+                            temperature=kwargs.get("temperature", 0.7)
+                        )
+                    )
+                    
+                    logger.info(f"Successfully used Gemini model: {model_name}")
+                    return response.text
+                    
+                except Exception as model_error:
+                    logger.warning(f"Failed to use model {model_name}: {model_error}")
+                    last_error = model_error
+                    continue
             
-            return response.text
+            # If all models failed, raise the last error
+            raise last_error or Exception("All Gemini models failed")
         
         except Exception as e:
             logger.error(f"Google Gemini chat completion error: {e}")
@@ -288,6 +313,86 @@ class OllamaProvider(AIProvider):
             raise
 
 
+class AzureOpenAIProvider(AIProvider):
+    """Azure OpenAI provider implementation."""
+    
+    def __init__(self, api_key: str, endpoint: str, deployment_name: str = "gpt-4"):
+        self.api_key = api_key
+        self.endpoint = endpoint
+        self.deployment_name = deployment_name
+        
+    async def chat_completion(self, messages: List[ChatMessage], **kwargs) -> str:
+        """Get chat completion from Azure OpenAI."""
+        try:
+            import openai
+            
+            # Configure Azure OpenAI client
+            client = openai.AzureOpenAI(
+                api_key=self.api_key,
+                azure_endpoint=self.endpoint,
+                api_version="2024-02-15-preview"
+            )
+            
+            # Format messages for OpenAI API
+            formatted_messages = []
+            for msg in messages:
+                formatted_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=self.deployment_name,
+                messages=formatted_messages,
+                max_tokens=kwargs.get("max_tokens", 2000),
+                temperature=kwargs.get("temperature", 0.7)
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"Azure OpenAI chat completion error: {e}")
+            raise
+    
+    async def stream_completion(self, messages: List[ChatMessage], **kwargs) -> AsyncIterator[str]:
+        """Stream chat completion from Azure OpenAI."""
+        try:
+            import openai
+            
+            # Configure Azure OpenAI client
+            client = openai.AzureOpenAI(
+                api_key=self.api_key,
+                azure_endpoint=self.endpoint,
+                api_version="2024-02-15-preview"
+            )
+            
+            # Format messages for OpenAI API
+            formatted_messages = []
+            for msg in messages:
+                formatted_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=self.deployment_name,
+                messages=formatted_messages,
+                max_tokens=kwargs.get("max_tokens", 2000),
+                temperature=kwargs.get("temperature", 0.7),
+                stream=True
+            )
+            
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+                    
+        except Exception as e:
+            logger.error(f"Azure OpenAI streaming error: {e}")
+            raise
+
+
 class GenAIManager:
     """Manager for coordinating multiple AI providers."""
     
@@ -298,14 +403,25 @@ class GenAIManager:
     
     def _initialize_providers(self):
         """Initialize available providers based on configuration."""
-        if self.settings.openai_api_key:
+        if self.settings.openai_api_key:            
             self.providers[GenAIProvider.OPENAI] = OpenAIProvider(self.settings.openai_api_key)
         
         if self.settings.anthropic_api_key:
             self.providers[GenAIProvider.ANTHROPIC] = AnthropicProvider(self.settings.anthropic_api_key)
         
         if self.settings.google_api_key:
-            self.providers[GenAIProvider.GOOGLE] = GoogleProvider(self.settings.google_api_key)
+            # Use gemini-1.5-flash as the default model
+            google_model = getattr(self.settings, 'google_model', 'gemini-1.5-flash')
+            self.providers[GenAIProvider.GOOGLE] = GoogleProvider(self.settings.google_api_key, google_model)
+        
+        if self.settings.azure_openai_key and self.settings.azure_openai_endpoint:
+            # Azure OpenAI requires both API key and endpoint
+            azure_deployment = getattr(self.settings, 'azure_deployment_name', 'gpt-4')
+            self.providers[GenAIProvider.AZURE] = AzureOpenAIProvider(
+                self.settings.azure_openai_key, 
+                self.settings.azure_openai_endpoint,
+                azure_deployment
+            )
         
         if self.settings.ollama_base_url:
             self.providers[GenAIProvider.OLLAMA] = OllamaProvider(self.settings.ollama_base_url)

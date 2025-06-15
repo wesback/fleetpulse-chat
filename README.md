@@ -93,8 +93,10 @@ GENAI_PROVIDER=openai  # openai, anthropic, google, azure, ollama
 OPENAI_API_KEY=sk-your-openai-key
 ANTHROPIC_API_KEY=sk-ant-api03-your-anthropic-key
 GOOGLE_API_KEY=your-google-api-key
+GOOGLE_MODEL=gemini-1.5-flash  # Optional: gemini-1.5-flash, gemini-1.5-pro, gemini-1.0-pro
 AZURE_OPENAI_KEY=your-azure-key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_DEPLOYMENT_NAME=gpt-4  # Optional: your Azure OpenAI deployment name
 ```
 
 #### Optional
