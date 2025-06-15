@@ -8,10 +8,10 @@ from core.mcp_client import MCPToolResult
 from ui.components import (
     render_provider_selector,
     render_prompt_selector,
-    generate_conversation_title,
     render_fleet_status_card,
     render_host_details_card
 )
+from utils.helpers import generate_conversation_title
 
 
 class TestUIComponents:
