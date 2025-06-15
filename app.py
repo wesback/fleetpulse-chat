@@ -100,25 +100,58 @@ class FleetPulseChatbot:
             "fleetpulse": True  # Would check actual API connectivity
         }
         return status
-    
-    async def _detect_tool_usage(self, user_message: str) -> List[Dict[str, Any]]:
+      async def _detect_tool_usage(self, user_message: str) -> List[Dict[str, Any]]:
         """Detect if user message suggests tool usage."""
         tools_to_try = []
         message_lower = user_message.lower()
         
-        # Simple keyword-based detection
+        # Enhanced keyword-based detection with natural language patterns
         tool_keywords = {
-            "get_fleet_status": ["fleet status", "overall status", "fleet health", "fleet overview"],
-            "get_host_details": ["host details", "server info", "host info", "system details"],
-            "get_pending_updates": ["pending updates", "available updates", "updates needed"],
-            "get_update_history": ["update history", "update log", "previous updates"],
-            "generate_fleet_report": ["generate report", "fleet report", "create report"],
-            "get_system_metrics": ["system metrics", "performance", "cpu usage", "memory usage"]
+            "get_fleet_status": [
+                "fleet status", "overall status", "fleet health", "fleet overview",
+                "my hosts", "all hosts", "servers", "fleet summary", "how many hosts",
+                "host status", "show me hosts", "list hosts", "hosts overview"
+            ],
+            "get_host_details": [
+                "host details", "server info", "host info", "system details",
+                "tell me about", "details about", "information about", "specific host",
+                "particular server", "one host", "individual host"
+            ],
+            "get_pending_updates": [
+                "pending updates", "available updates", "updates needed", "updates waiting",
+                "need updates", "require updates", "outstanding updates", "updates available",
+                "what updates", "which updates", "any updates"
+            ],
+            "get_update_history": [
+                "update history", "update log", "previous updates", "past updates",
+                "updates happened", "recent updates", "last updates", "update activity",
+                "what happened", "what changed", "installation history", "package history",
+                "last few days", "recently updated", "update timeline", "changes made"
+            ],
+            "generate_fleet_report": [
+                "generate report", "fleet report", "create report", "full report",
+                "comprehensive report", "summary report", "detailed report"
+            ],
+            "get_system_metrics": [
+                "system metrics", "performance", "cpu usage", "memory usage",
+                "resource usage", "system performance", "metrics", "monitoring",
+                "system stats", "resource stats"
+            ]
         }
         
+        # Check for tool matches
         for tool_name, keywords in tool_keywords.items():
             if any(keyword in message_lower for keyword in keywords):
                 tools_to_try.append({"name": tool_name, "keywords": keywords})
+        
+        # Special logic for complex queries
+        if any(word in message_lower for word in ["hosts", "servers", "fleet"]):
+            if "update" in message_lower and any(time_ref in message_lower for time_ref in ["last", "recent", "past", "happened", "days", "week"]):
+                # Query about recent updates across hosts
+                if "get_update_history" not in [t["name"] for t in tools_to_try]:
+                    tools_to_try.append({"name": "get_update_history", "keywords": ["updates happened"]})
+                if "get_fleet_status" not in [t["name"] for t in tools_to_try]:
+                    tools_to_try.append({"name": "get_fleet_status", "keywords": ["hosts"]})
         
         return tools_to_try
     
@@ -173,39 +206,99 @@ class FleetPulseChatbot:
                     "result": None,
                     "success": False,
                     "error": str(e)
-                })
-        
+                })        
         return tool_results
     
     def _extract_tool_parameters(self, tool_name: str, message: str) -> Dict[str, Any]:
-        """Extract parameters for tools from user message (simplified)."""
+        """Extract parameters for tools from user message (enhanced)."""
         import re
+        from datetime import datetime, timedelta
         
         params = {}
+        message_lower = message.lower()
         
-        # Extract hostnames
-        hostname_pattern = r'\b[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*\b'
-        hostnames = re.findall(hostname_pattern, message)
+        # Extract hostnames (improved pattern)
+        hostname_pattern = r'\b(?:host|server)\s+([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*)\b'
+        hostname_matches = re.findall(hostname_pattern, message, re.IGNORECASE)
+        hostnames = [match[0] for match in hostname_matches if match[0]]
+        
+        # Also look for standalone hostnames
+        standalone_hostname_pattern = r'\b([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*)\b'
+        standalone_matches = re.findall(standalone_hostname_pattern, message)
+        standalone_hostnames = [match[0] for match in standalone_matches if match[0] and '.' in match[0]]
+        
+        all_hostnames = list(set(hostnames + standalone_hostnames))
         
         if tool_name in ["get_host_details", "get_update_history", "get_system_metrics"]:
-            if hostnames:
-                params["hostname"] = hostnames[0]
+            if all_hostnames:
+                params["hostname"] = all_hostnames[0]
         
         if tool_name == "schedule_updates":
-            if hostnames:
-                params["hostnames"] = hostnames
+            if all_hostnames:
+                params["hostnames"] = all_hostnames
         
-        # Extract days for history
+        # Extract time periods for history queries
         if tool_name == "get_update_history":
-            day_match = re.search(r'(\d+)\s*days?', message)
-            if day_match:
-                params["days"] = int(day_match.group(1))
+            # Look for explicit day counts
+            day_patterns = [
+                r'(\d+)\s*days?',
+                r'last\s+(\d+)\s*days?',
+                r'past\s+(\d+)\s*days?',
+                r'recent\s+(\d+)\s*days?'
+            ]
+            
+            for pattern in day_patterns:
+                day_match = re.search(pattern, message_lower)
+                if day_match:
+                    params["days"] = int(day_match.group(1))
+                    break
+            
+            # Default time periods for common phrases
+            if "days" not in params:
+                if any(phrase in message_lower for phrase in ["last few days", "recent days", "past few days"]):
+                    params["days"] = 7
+                elif any(phrase in message_lower for phrase in ["last week", "past week", "this week"]):
+                    params["days"] = 7
+                elif any(phrase in message_lower for phrase in ["last month", "past month", "this month"]):
+                    params["days"] = 30
+                elif any(phrase in message_lower for phrase in ["yesterday", "last day"]):
+                    params["days"] = 1
+                elif any(phrase in message_lower for phrase in ["today", "recent", "latest"]):
+                    params["days"] = 1
         
-        # Extract severity
+        # Extract severity levels
         if tool_name == "get_pending_updates":
-            severity_match = re.search(r'(critical|high|important|medium|moderate|low)', message.lower())
-            if severity_match:
-                params["severity"] = severity_match.group(1)
+            severity_patterns = [
+                r'\b(critical|high|important|medium|moderate|low)\b',
+                r'\b(urgent|emergency)\b',  # Map to critical
+                r'\b(normal|regular)\b'     # Map to medium
+            ]
+            
+            for pattern in severity_patterns:
+                severity_match = re.search(pattern, message_lower)
+                if severity_match:
+                    severity = severity_match.group(1)
+                    if severity in ["urgent", "emergency"]:
+                        severity = "critical"
+                    elif severity in ["normal", "regular"]:
+                        severity = "medium"
+                    params["severity"] = severity
+                    break
+        
+        # Extract package names
+        if tool_name == "check_package_info":
+            package_patterns = [
+                r'package\s+([a-zA-Z0-9\-_+\.]+)',
+                r'([a-zA-Z0-9\-_+\.]+)\s+package',
+                r'about\s+([a-zA-Z0-9\-_+\.]+)',
+                r'info\s+([a-zA-Z0-9\-_+\.]+)'
+            ]
+            
+            for pattern in package_patterns:
+                package_match = re.search(pattern, message, re.IGNORECASE)
+                if package_match:
+                    params["package_name"] = package_match.group(1)
+                    break
         
         return params
     
@@ -229,9 +322,14 @@ class FleetPulseChatbot:
             
             # Add current user message
             messages.append(ChatMessage(role="user", content=user_message))
-            
-            # Check for tool usage
+              # Check for tool usage - use both keyword detection and AI-driven selection
             suggested_tools = await self._detect_tool_usage(user_message)
+            
+            # If keyword detection didn't find tools, try AI-driven selection
+            if not suggested_tools and self.genai_manager:
+                ai_selected_tools = await self._ai_driven_tool_selection(user_message)
+                suggested_tools.extend(ai_selected_tools)
+            
             tool_context = ""
             
             if suggested_tools:
@@ -431,6 +529,67 @@ class FleetPulseChatbot:
                 from ui.components import render_tool_usage_display
                 render_tool_usage_display(st.session_state.tools_used)
     
+    async def _ai_driven_tool_selection(self, user_message: str) -> List[Dict[str, Any]]:
+        """Use AI to intelligently select which tools to call based on user intent."""
+        try:
+            # Create a specialized prompt for tool selection
+            tool_selection_prompt = f"""
+            You are a tool selection specialist for FleetPulse fleet management.
+            
+            Available tools:
+            1. get_fleet_status - Get overall fleet health and status summary
+            2. get_host_details - Get detailed information about a specific host (requires hostname)
+            3. get_update_history - Get package update history (requires hostname, optional days parameter)
+            4. get_pending_updates - Get list of systems with pending updates (optional severity filter)
+            5. schedule_updates - Schedule update operations (requires hostnames and schedule)
+            6. generate_fleet_report - Generate comprehensive fleet reports
+            7. get_system_metrics - Get system performance metrics (requires hostname)
+            8. check_package_info - Get package information (requires package_name)
+            
+            User query: "{user_message}"
+            
+            Based on the user's query, determine which tools should be called to provide a complete answer.
+            Consider that:
+            - Questions about "hosts", "servers", or "fleet" often need get_fleet_status first
+            - Questions about specific hosts need get_host_details
+            - Questions about "updates" with time references need get_update_history
+            - Questions about current update status need get_pending_updates
+            - Multiple tools may be needed for comprehensive answers
+            
+            Respond with a JSON array of tool names that should be called:
+            ["tool1", "tool2", ...]
+            
+            If no tools are needed, respond with: []
+            """
+            
+            # Use a simple AI call to determine tools
+            provider = GenAIProvider(st.session_state.ai_provider)
+            messages = [ChatMessage(role="system", content=tool_selection_prompt)]
+            
+            response = await self.genai_manager.chat_completion(
+                messages,
+                provider=provider,
+                temperature=0.1,  # Low temperature for consistent tool selection
+                max_tokens=100
+            )
+            
+            # Parse the response
+            import json
+            try:
+                tool_names = json.loads(response.strip())
+                if isinstance(tool_names, list):
+                    return [{"name": tool_name, "keywords": ["ai_selected"]} for tool_name in tool_names]
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse AI tool selection response: {response}")
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error in AI-driven tool selection: {e}")
+            # Fall back to keyword detection
+            return await self._detect_tool_usage(user_message)
+
+    # ...existing code...
     def run(self):
         """Run the main application."""
         try:
