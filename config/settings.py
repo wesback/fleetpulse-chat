@@ -15,6 +15,13 @@ class GenAIProvider(str, Enum):
     OLLAMA = "ollama"
 
 
+class MCPConnectionType(str, Enum):
+    """Supported MCP connection types."""
+    STDIO = "stdio"
+    HTTP = "http"
+    WEBSOCKET = "websocket"
+
+
 class AppSettings(BaseSettings):
     """Application settings with environment variable support."""
     
@@ -28,10 +35,15 @@ class AppSettings(BaseSettings):
     azure_openai_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_KEY")
     azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
     ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
-    
-    # FleetPulse Integration
+      # FleetPulse Integration (Legacy REST API)
     fleetpulse_api_url: str = Field(default="http://localhost:8000", env="FLEETPULSE_API_URL")
-    fleetpulse_mcp_server: str = Field(default="./fleetpulse-mcp", env="FLEETPULSE_MCP_SERVER")
+    
+    # FastMCP Server Configuration
+    mcp_connection_type: MCPConnectionType = Field(default=MCPConnectionType.HTTP, env="MCP_CONNECTION_TYPE")
+    mcp_server_url: Optional[str] = Field(default=None, env="MCP_SERVER_URL")
+    mcp_server_command: Optional[str] = Field(default=None, env="MCP_SERVER_COMMAND")
+    mcp_timeout: int = Field(default=30, env="MCP_TIMEOUT")
+    mcp_max_retries: int = Field(default=3, env="MCP_MAX_RETRIES")
     
     # Application Configuration
     streamlit_server_port: int = Field(default=8501, env="STREAMLIT_SERVER_PORT")
