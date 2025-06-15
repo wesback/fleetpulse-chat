@@ -100,7 +100,7 @@ class FleetPulseChatbot:
             "fleetpulse": True  # Would check actual API connectivity
         }
         return status
-      async def _detect_tool_usage(self, user_message: str) -> List[Dict[str, Any]]:
+    async def _detect_tool_usage(self, user_message: str) -> List[Dict[str, Any]]:
         """Detect if user message suggests tool usage."""
         tools_to_try = []
         message_lower = user_message.lower()
