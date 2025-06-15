@@ -2,8 +2,7 @@
 
 import os
 from typing import Optional, List
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
 
 
@@ -16,38 +15,64 @@ class GenAIProvider(str, Enum):
     OLLAMA = "ollama"
 
 
+class MCPConnectionType(str, Enum):
+    """Supported MCP connection types."""
+    STDIO = "stdio"
+    HTTP = "http"
+    WEBSOCKET = "websocket"
+
+
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"  # Ignore extra fields instead of forbidding them
+    )
+    
     # GenAI Provider Configuration
-    genai_provider: GenAIProvider = Field(default=GenAIProvider.OPENAI, env="GENAI_PROVIDER")
+    genai_provider: GenAIProvider = GenAIProvider.OPENAI
     
     # API Keys
-    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
-    google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
-    azure_openai_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_KEY")
-    azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
-    ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    azure_openai_key: Optional[str] = None
+    azure_openai_endpoint: Optional[str] = None
+    ollama_base_url: str = "http://localhost:11434"
     
     # FleetPulse Integration
-    fleetpulse_api_url: str = Field(default="http://localhost:8000", env="FLEETPULSE_API_URL")
-    fleetpulse_mcp_server: str = Field(default="./fleetpulse-mcp", env="FLEETPULSE_MCP_SERVER")
+    fleetpulse_api_url: str = "http://localhost:8000"
+    fleetpulse_mcp_server: str = "./fleetpulse-mcp"
+    
+    # MCP Configuration
+    mcp_connection_type: MCPConnectionType = MCPConnectionType.HTTP
+    mcp_server_url: Optional[str] = None
+    mcp_timeout: int = 30
+    mcp_max_retries: int = 3
     
     # Application Configuration
-    streamlit_server_port: int = Field(default=8501, env="STREAMLIT_SERVER_PORT")
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    enable_debug: bool = Field(default=False, env="ENABLE_DEBUG")
+    streamlit_server_port: int = 8501
+    log_level: str = "INFO"
+    enable_debug: bool = False
     
     # Database Configuration
-    database_url: str = Field(default="sqlite:///fleetpulse_chat.db", env="DATABASE_URL")
+    database_url: str = "sqlite:///fleetpulse_chat.db"
     
     # Security
-    secret_key: str = Field(default="dev-secret-key-change-in-production", env="SECRET_KEY")
+    secret_key: str = "dev-secret-key-change-in-production"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    # Optional Features
+    redis_url: Optional[str] = None
+    enable_experimental_features: bool = False
+    
+    # Rate Limiting
+    rate_limit_requests_per_minute: int = 60
+    
+    # Model Defaults
+    default_temperature: float = 0.7
+    default_max_tokens: int = 2000
 
 
 # Global settings instance
