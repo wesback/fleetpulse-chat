@@ -575,8 +575,23 @@ class FleetPulseChatbot:
             
             # Parse the response
             import json
+            import re
+            
+            # Extract JSON from potential markdown code blocks
+            response_cleaned = response.strip()
+            
+            # Try to extract JSON from markdown code blocks
+            # Pattern matches ```json\n...``` or ```\n...```
+            markdown_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+            match = re.search(markdown_pattern, response_cleaned, re.DOTALL)
+            
+            if match:
+                json_content = match.group(1).strip()
+            else:
+                json_content = response_cleaned
+            
             try:
-                tool_names = json.loads(response.strip())
+                tool_names = json.loads(json_content)
                 if isinstance(tool_names, list):
                     return [{"name": tool_name, "keywords": ["ai_selected"]} for tool_name in tool_names]
             except json.JSONDecodeError:
