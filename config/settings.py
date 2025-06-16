@@ -26,31 +26,66 @@ class AppSettings(BaseSettings):
     """Application settings with environment variable support."""
     
     # GenAI Provider Configuration
-    genai_provider: GenAIProvider = Field(default=GenAIProvider.OPENAI, env="GENAI_PROVIDER")    # API Keys
-    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
-    google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
-    azure_openai_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_KEY")
-    azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
-    ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
-      # FleetPulse Integration (Legacy REST API)
-    fleetpulse_api_url: str = Field(default="http://localhost:8000", env="FLEETPULSE_API_URL")
+    genai_provider: GenAIProvider = GenAIProvider.OPENAI
+    
+    # API Keys
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    azure_openai_key: Optional[str] = None
+    azure_openai_endpoint: Optional[str] = None
+    ollama_base_url: str = "http://localhost:11434"
+    
+    # FleetPulse Integration (Legacy REST API)
+    fleetpulse_api_url: str = "http://localhost:8000"
     
     # FastMCP Server Configuration
-    mcp_connection_type: MCPConnectionType = Field(default=MCPConnectionType.HTTP, env="MCP_CONNECTION_TYPE")
-    mcp_server_url: Optional[str] = Field(default=None, env="MCP_SERVER_URL")
-    mcp_server_command: Optional[str] = Field(default=None, env="MCP_SERVER_COMMAND")
-    mcp_timeout: int = Field(default=30, env="MCP_TIMEOUT")
-    mcp_max_retries: int = Field(default=3, env="MCP_MAX_RETRIES")
+    mcp_connection_type: MCPConnectionType = MCPConnectionType.HTTP
+    mcp_server_url: str = "http://localhost:8001"
+    mcp_server_command: Optional[str] = None
+    mcp_timeout: int = 30
+    mcp_max_retries: int = 3
     
     # Application Configuration
-    streamlit_server_port: int = Field(default=8501, env="STREAMLIT_SERVER_PORT")
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    enable_debug: bool = Field(default=False, env="ENABLE_DEBUG")
+    streamlit_server_port: int = 8501
+    log_level: str = "INFO"
+    enable_debug: bool = False
     
     # Database Configuration
-    database_url: str = Field(default="sqlite:///fleetpulse_chat.db", env="DATABASE_URL")
+    database_url: str = "sqlite:///fleetpulse_chat.db"
     
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+
+# Singleton instance
+_settings = None
+
+
+def get_settings() -> AppSettings:
+    """Get application settings."""
+    global _settings
+    if _settings is None:
+        _settings = AppSettings()
+    return _settings
+
+
+def get_available_providers() -> list[GenAIProvider]:
+    """Get list of available GenAI providers based on API keys."""
+    settings = get_settings()
+    providers = []
+    
+    if settings.openai_api_key:
+        providers.append(GenAIProvider.OPENAI)
+    if settings.anthropic_api_key:
+        providers.append(GenAIProvider.ANTHROPIC)
+    if settings.google_api_key:
+        providers.append(GenAIProvider.GOOGLE)
+    if settings.azure_openai_key and settings.azure_openai_endpoint:
+        providers.append(GenAIProvider.AZURE)
+    # Ollama is always available if the base URL is configured
+    if settings.ollama_base_url:
+        providers.append(GenAIProvider.OLLAMA)
+    
+    return providers

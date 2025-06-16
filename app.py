@@ -67,10 +67,18 @@ class FleetPulseChatbot:
             try:
                 self.genai_manager = GenAIManager()
                 self.mcp_client = await get_mcp_client()
-                logger.info("Async components initialized successfully")
+                
+                # Check if MCP client initialized successfully
+                if hasattr(self.mcp_client, '_initialized') and self.mcp_client._initialized:
+                    logger.info("Async components initialized successfully with MCP tools online")
+                else:
+                    logger.warning("MCP client initialized but tools are offline - check MCP server connection")
+                    
             except Exception as e:
                 logger.error("Failed to initialize async components: %s", e)
-                st.error(f"Initialization error: {e}")
+                # Don't show error to user for MCP issues - the app should still work
+                if "MCP" not in str(e):
+                    st.error(f"Initialization error: {e}")
     
     def _initialize_session_state(self):
         """Initialize Streamlit session state."""
@@ -395,9 +403,11 @@ class FleetPulseChatbot:
             # Add tool context to message if available
             if tool_context:
                 enhanced_message = user_message + tool_context
-                messages[-1] = ChatMessage(role="user", content=enhanced_message)
-            
-            # Get AI response
+                messages[-1] = ChatMessage(role="user", content=enhanced_message)            # Get AI response
+            if not self.genai_manager:
+                st.error("AI manager not initialized. Please refresh the page.")
+                return "Error: AI manager not initialized"
+                
             provider = GenAIProvider(st.session_state.ai_provider)
             response = await self.genai_manager.chat_completion(
                 messages,
