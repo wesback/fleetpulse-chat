@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # MCP Configuration
     mcp_connection_type: MCPConnectionType = MCPConnectionType.HTTP
     mcp_server_url: Optional[str] = None
+    mcp_server_command: Optional[str] = None
     mcp_timeout: int = 30
     mcp_max_retries: int = 3
     

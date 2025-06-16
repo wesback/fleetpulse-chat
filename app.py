@@ -52,23 +52,21 @@ class FleetPulseChatbot:
     def __init__(self):
         self.genai_manager = None
         self.mcp_client = None
-        self.conversation_manager = None
-        self.fleet_dashboard = None
-        # Async initialization for MCP client
-        asyncio.run(self._initialize_components())
+        self.conversation_manager = ConversationManager()
+        self.fleet_dashboard = FleetDashboard()
+        self._async_init_started = False
     
-    async def _initialize_components(self):
-        """Initialize core components (async for MCP)."""
-        try:
-            self.genai_manager = GenAIManager()
-            # Use FastMCPClient via async factory
-            self.mcp_client = await get_mcp_client()
-            self.conversation_manager = ConversationManager()
-            self.fleet_dashboard = FleetDashboard()
-            logger.info("Components initialized successfully")
-        except Exception as e:
-            logger.error("Failed to initialize components: %s", e)
-            st.error(f"Initialization error: {e}")
+    async def _async_initialize_components(self):
+        """Async initialization for MCP and GenAI."""
+        if not self._async_init_started:
+            self._async_init_started = True
+            try:
+                self.genai_manager = GenAIManager()
+                self.mcp_client = await get_mcp_client()
+                logger.info("Async components initialized successfully")
+            except Exception as e:
+                logger.error("Failed to initialize async components: %s", e)
+                st.error(f"Initialization error: {e}")
     
     def _initialize_session_state(self):
         """Initialize Streamlit session state."""
@@ -611,13 +609,15 @@ class FleetPulseChatbot:
         """Run the main application."""
         try:
             self._initialize_session_state()
-            
+            # Ensure async components are initialized
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._async_initialize_components())
+            loop.close()
             # Render sidebar
             self._render_sidebar()
-            
             # Render main interface
             self._render_main_interface()
-            
         except Exception as e:
             logger.error("Application error: %s", e)
             render_error_message(
