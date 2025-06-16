@@ -22,13 +22,17 @@ from core.conversation import ConversationManager
 from ui.components import (
     render_provider_selector, render_prompt_selector, render_chat_message,
     render_configuration_panel, render_conversation_sidebar,
-    render_welcome_screen, render_error_message, render_status_indicators
+    render_welcome_screen, render_error_message, render_status_indicators,
+    render_error_display, render_diagnostic_panel, render_tool_status_indicator,
+    render_quick_recovery_panel, render_tool_error_recovery_guide,
+    render_smart_expert_panel
 )
 from ui.dashboard import FleetDashboard, run_dashboard_async
 
 # Utils imports
 from utils.helpers import setup_logging, generate_conversation_title, format_timestamp
 from utils.validators import sanitize_input, validate_mcp_tool_parameters, ValidationError
+from utils.mcp_diagnostics import MCPDiagnosticRunner
 
 
 # Configure Streamlit page
@@ -83,14 +87,15 @@ class FleetPulseChatbot:
         if "system_prompt" not in st.session_state:
             st.session_state.system_prompt = "general"
         
-        if "tools_used" not in st.session_state:
-            st.session_state.tools_used = []
-        
+        if "tools_used" not in st.session_state:            st.session_state.tools_used = []        
         if "model_params" not in st.session_state:
             st.session_state.model_params = {"temperature": 0.7, "max_tokens": 2000}
         
         if "show_dashboard" not in st.session_state:
             st.session_state.show_dashboard = False
+        
+        if "show_diagnostics" not in st.session_state:
+            st.session_state.show_diagnostics = False
     
     def _check_system_status(self) -> Dict[str, bool]:
         """Check status of system components."""
@@ -100,6 +105,31 @@ class FleetPulseChatbot:
             "fleetpulse": True  # Would check actual API connectivity
         }
         return status
+    
+    async def _run_system_diagnostics(self) -> List:
+        """Run comprehensive system diagnostics."""
+        try:
+            runner = MCPDiagnosticRunner()
+            return await runner.run_full_diagnostics()
+        except Exception as e:
+            logger.error(f"Diagnostic runner failed: {e}")
+            return []
+    
+    def _handle_tool_error(self, tool_result):
+        """Handle MCP tool errors with enhanced UI feedback."""
+        if not tool_result.success:
+            # Display comprehensive error information
+            render_error_display(tool_result)
+            
+            # Show specific recovery guidance if error type is known
+            if tool_result.error_type:
+                render_tool_error_recovery_guide(tool_result.error_type)
+            
+            # Log error for debugging
+            logger.error(f"Tool execution failed: {tool_result.error}")
+            
+            return False
+        return True
     async def _detect_tool_usage(self, user_message: str) -> List[Dict[str, Any]]:
         """Detect if user message suggests tool usage."""
         tools_to_try = []
@@ -144,8 +174,7 @@ class FleetPulseChatbot:
             if any(keyword in message_lower for keyword in keywords):
                 tools_to_try.append({"name": tool_name, "keywords": keywords})
         
-        # Special logic for complex queries
-        if any(word in message_lower for word in ["hosts", "servers", "fleet"]):
+        # Special logic for complex queries        if any(word in message_lower for word in ["hosts", "servers", "fleet"]):
             if "update" in message_lower and any(time_ref in message_lower for time_ref in ["last", "recent", "past", "happened", "days", "week"]):
                 # Query about recent updates across hosts
                 if "get_update_history" not in [t["name"] for t in tools_to_try]:
@@ -169,16 +198,34 @@ class FleetPulseChatbot:
                 # Validate parameters
                 validated_params = validate_mcp_tool_parameters(tool_name, parameters)
                 
-                # Execute tool
+                # Execute tool with null check for mcp_client
+                if not self.mcp_client:
+                    logger.error("MCP client not initialized")
+                    st.error("MCP client not available. Please check system status.")
+                    continue
+                
                 result = await self.mcp_client.execute_tool(tool_name, validated_params)
                 
-                tool_results.append({
-                    "name": tool_name,
-                    "parameters": validated_params,
-                    "result": result.data if result.success else None,
-                    "success": result.success,
-                    "error": result.error
-                })
+                # Handle tool errors with enhanced error display
+                if not result.success:
+                    self._handle_tool_error(result)
+                    
+                    # Still record the failed attempt
+                    tool_results.append({
+                        "name": tool_name,
+                        "parameters": validated_params,
+                        "result": None,
+                        "success": False,
+                        "error": result.error
+                    })
+                else:
+                    tool_results.append({
+                        "name": tool_name,
+                        "parameters": validated_params,
+                        "result": result.data,
+                        "success": True,
+                        "error": None
+                    })
                 
                 # Add to session state for display
                 st.session_state.tools_used.append({
@@ -206,7 +253,8 @@ class FleetPulseChatbot:
                     "result": None,
                     "success": False,
                     "error": str(e)
-                })        
+                })
+        
         return tool_results
     
     def _extract_tool_parameters(self, tool_name: str, message: str) -> Dict[str, Any]:
@@ -319,10 +367,10 @@ class FleetPulseChatbot:
             if st.session_state.current_conversation_id:
                 history = self.conversation_manager.get_chat_history(st.session_state.current_conversation_id)
                 messages.extend(history)
-            
-            # Add current user message
+              # Add current user message
             messages.append(ChatMessage(role="user", content=user_message))
-              # Check for tool usage - use both keyword detection and AI-driven selection
+            
+            # Check for tool usage - use both keyword detection and AI-driven selection
             suggested_tools = await self._detect_tool_usage(user_message)
             
             # If keyword detection didn't find tools, try AI-driven selection
@@ -369,10 +417,9 @@ class FleetPulseChatbot:
             self.conversation_manager.add_message(
                 st.session_state.current_conversation_id,
                 role,
-                content
-            )
+                content            )
     
-    def _create_new_conversation(self, first_message: Optional[str] = None) -> int:
+    def _create_new_conversation(self, first_message: Optional[str] = None) -> Optional[int]:
         """Create a new conversation."""
         title = generate_conversation_title(first_message) if first_message else "New Conversation"
         
@@ -382,12 +429,24 @@ class FleetPulseChatbot:
             system_prompt=st.session_state.system_prompt
         )
         
-        return conversation.id
+        return conversation.id if conversation else None
     
     def _render_main_interface(self):
         """Render the main chat interface."""
-        # Header
-        col1, col2, col3 = st.columns([2, 1, 1])
+        # Check if diagnostics panel should be shown
+        if st.session_state.get("show_diagnostics", False):
+            st.title("🏥 FleetPulse System Diagnostics")
+            
+            # Back button
+            if st.button("← Back to Chat"):
+                st.session_state.show_diagnostics = False
+                st.rerun()
+            
+            # Render full diagnostic panel
+            render_diagnostic_panel()
+            return
+          # Header with intelligent expert selection
+        col1, col2 = st.columns([3, 1])
         
         with col1:
             st.title("🚀 FleetPulse GenAI Chatbot")
@@ -401,13 +460,59 @@ class FleetPulseChatbot:
                     st.session_state.ai_provider
                 )
         
-        with col3:
-            # System prompt selection
-            st.session_state.system_prompt = render_prompt_selector(st.session_state.system_prompt)
+        # Smart Expert Selection Panel
+        # Get the current user input from session state if available
+        current_input = st.session_state.get("current_user_input", "")
         
-        # Dashboard toggle
-        if st.button("📊 Toggle Dashboard", key="dashboard_toggle"):
-            st.session_state.show_dashboard = not st.session_state.show_dashboard
+        # Get conversation history for context
+        conversation_history = []
+        if st.session_state.current_conversation_id:
+            stored_messages = self.conversation_manager.get_chat_history(st.session_state.current_conversation_id)
+            conversation_history = [{"role": msg.role, "content": msg.content} for msg in stored_messages[-5:]]  # Last 5 messages for context
+        
+        # Render intelligent expert selection panel
+        st.session_state.system_prompt = render_smart_expert_panel(
+            user_input=current_input,
+            conversation_history=conversation_history,
+            current_expert=st.session_state.system_prompt,
+            show_insights=st.session_state.get("show_expert_insights", False)
+        )
+        
+        # Action buttons row
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            # Dashboard toggle
+            if st.button("📊 Toggle Dashboard", key="dashboard_toggle"):
+                st.session_state.show_dashboard = not st.session_state.show_dashboard
+        
+        with col2:
+            # Diagnostics button
+            if st.button("🏥 System Diagnostics", key="diagnostics_toggle"):
+                st.session_state.show_diagnostics = True
+                st.rerun()
+        
+        with col3:
+            # Quick health check
+            if st.button("🔍 Quick Health Check", key="health_check"):
+                with st.spinner("Checking system health..."):
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            results = loop.run_until_complete(self._run_system_diagnostics())
+                            if results:
+                                error_count = sum(1 for r in results if r.status == "error")
+                                if error_count > 0:
+                                    st.error(f"⚠️ {error_count} issues detected")
+                                else:
+                                    st.success("✅ All systems healthy")
+                            else:
+                                st.warning("Unable to run diagnostics")
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        st.error(f"Health check failed: {str(e)}")
         
         # Show dashboard if enabled
         if st.session_state.show_dashboard:
@@ -435,13 +540,15 @@ class FleetPulseChatbot:
                 for message in stored_messages:
                     if message.role != "system":  # Don't show system prompts
                         render_chat_message(message)
-        
-        # Chat input
+          # Chat input
         if prompt := st.chat_input("Ask me anything about your fleet..."):
             self._handle_user_input(prompt)
     
     def _handle_user_input(self, user_input: str):
         """Handle user input and generate response."""
+        # Store current input for expert routing
+        st.session_state.current_user_input = user_input
+        
         # Create new conversation if needed
         if not st.session_state.current_conversation_id:
             st.session_state.current_conversation_id = self._create_new_conversation(user_input)
@@ -476,8 +583,7 @@ class FleetPulseChatbot:
                         timestamp=datetime.now().isoformat()
                     )
                     st.session_state.messages.append(assistant_message)
-                    self._save_conversation_message("assistant", response)
-                    
+                    self._save_conversation_message("assistant", response)                    
                 except Exception as e:
                     error_msg = f"I apologize, but I encountered an error: {str(e)}"
                     st.error(error_msg)
@@ -490,8 +596,56 @@ class FleetPulseChatbot:
             status = self._check_system_status()
             render_status_indicators(status["genai"], status["mcp"], status["fleetpulse"])
             
-            # Configuration panel
+            # MCP Tool status indicator
+            if self.mcp_client:
+                render_tool_status_indicator(self.mcp_client)
+              # Configuration panel
             st.session_state.model_params = render_configuration_panel()
+            
+            # Expert Routing Configuration
+            with st.expander("🧠 Expert Routing Settings", expanded=False):
+                st.session_state.show_expert_insights = st.checkbox(
+                    "Show Expert Routing Analysis",
+                    value=st.session_state.get("show_expert_insights", False),
+                    help="Display detailed analysis of how the system selects experts"
+                )
+                
+                if st.button("🔄 Reset Expert Selection"):
+                    st.session_state.system_prompt = "general"
+                    st.session_state.current_user_input = ""
+                    st.success("Expert selection reset to General Assistant")
+            
+            # Diagnostic and Recovery Section
+            with st.expander("🏥 System Diagnostics", expanded=False):
+                if st.button("🔍 Run Diagnostics"):
+                    with st.spinner("Running diagnostics..."):
+                        diagnostic_results = asyncio.run(self._run_system_diagnostics())
+                        if diagnostic_results:
+                            st.session_state.diagnostic_results = diagnostic_results
+                            st.success(f"Diagnostics completed - {len(diagnostic_results)} checks run")
+                        else:
+                            st.warning("Diagnostic runner failed")
+                
+                # Quick recovery panel
+                if self.mcp_client:
+                    render_quick_recovery_panel(self.mcp_client)
+            
+            # Show latest diagnostic results if available
+            if hasattr(st.session_state, 'diagnostic_results') and st.session_state.diagnostic_results:
+                with st.expander("📋 Latest Diagnostic Results", expanded=False):
+                    results = st.session_state.diagnostic_results
+                    healthy_count = sum(1 for r in results if r.status == "healthy")
+                    error_count = sum(1 for r in results if r.status == "error")
+                    
+                    if error_count > 0:
+                        st.error(f"⚠️ {error_count} issues detected")
+                    else:
+                        st.success(f"✅ All {healthy_count} checks passed")
+                    
+                    if st.button("📄 View Full Report"):
+                        # This would open the full diagnostic panel in main area
+                        st.session_state.show_diagnostics = True
+                        st.rerun()
             
             # Conversation management
             conversations = self.conversation_manager.list_conversations(limit=20)
@@ -528,6 +682,18 @@ class FleetPulseChatbot:
             if st.session_state.tools_used:
                 from ui.components import render_tool_usage_display
                 render_tool_usage_display(st.session_state.tools_used)
+            
+            # Error handling guidance
+            if any(not tool.get("success", True) for tool in st.session_state.tools_used):
+                with st.expander("🛠️ Error Recovery", expanded=True):
+                    st.warning("Some tools have failed. Check the main chat for detailed error information.")
+                    if st.button("🔄 Reset All Tools"):
+                        # Reset tool errors
+                        st.session_state.tools_used = []
+                        if self.mcp_client:
+                            # Reinitialize MCP client
+                            st.session_state.mcp_client = type(self.mcp_client)()
+                        st.rerun()
     
     async def _ai_driven_tool_selection(self, user_message: str) -> List[Dict[str, Any]]:
         """Use AI to intelligently select which tools to call based on user intent."""
@@ -561,8 +727,11 @@ class FleetPulseChatbot:
             
             If no tools are needed, respond with: []
             """
+              # Use a simple AI call to determine tools
+            if not self.genai_manager:
+                logger.warning("GenAI manager not available for tool selection")
+                return []
             
-            # Use a simple AI call to determine tools
             provider = GenAIProvider(st.session_state.ai_provider)
             messages = [ChatMessage(role="system", content=tool_selection_prompt)]
             

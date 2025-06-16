@@ -20,9 +20,8 @@ class FleetDashboard:
     async def render_overview_dashboard(self):
         """Render the main fleet overview dashboard."""
         st.header("🚀 Fleet Overview Dashboard")
-        
-        # Get fleet status
-        fleet_result = await self.mcp_client.execute_tool("get_fleet_status", {})
+          # Get fleet status
+        fleet_result = await self.mcp_client.execute_tool("list_hosts", {})
         
         if fleet_result.success:
             fleet_data = fleet_result.data
@@ -93,9 +92,8 @@ class FleetDashboard:
     async def _render_update_status_chart(self):
         """Render update status across the fleet."""
         st.subheader("Update Status")
-        
-        # Get pending updates data
-        updates_result = await self.mcp_client.execute_tool("get_pending_updates", {})
+          # Get recent update reports
+        updates_result = await self.mcp_client.execute_tool("get_update_reports", {"days": 7})
         
         if updates_result.success:
             updates_data = updates_result.data.get("hosts", [])
@@ -193,8 +191,8 @@ class FleetDashboard:
         st.subheader("📊 System Metrics")
         
         metrics_result = await self.mcp_client.execute_tool(
-            "get_system_metrics",
-            {"hostname": hostname, "metric_types": ["cpu", "memory", "disk"]}
+            "get_host_details",
+            {"hostname": hostname}
         )
         
         if metrics_result.success:
@@ -261,9 +259,8 @@ class FleetDashboard:
     async def _render_package_status(self, hostname: str):
         """Render package status information."""
         st.subheader("📦 Package Status")
-        
-        # Get pending updates for this host
-        updates_result = await self.mcp_client.execute_tool("get_pending_updates", {})
+          # Get recent updates for this host
+        updates_result = await self.mcp_client.execute_tool("get_host_reports", {"hostname": hostname, "days": 30})
         
         if updates_result.success:
             all_hosts = updates_result.data.get("hosts", [])
@@ -331,22 +328,21 @@ class FleetDashboard:
         """Generate and display fleet report."""
         with st.spinner("Generating report..."):
             report_result = await self.mcp_client.execute_tool(
-                "generate_fleet_report",
-                {"format": format, "include_history": include_history}
+                "get_fleet_statistics",
+                {}
             )
-            
             if report_result.success:
                 report_data = report_result.data
                 
                 if format == "json":
                     st.json(report_data)
                 elif format == "html":
-                    st.components.v1.html(report_data.get("content", ""), height=500, scrolling=True)
+                    st.markdown(str(report_data), unsafe_allow_html=True)
                 else:
                     st.success("Report generated successfully!")
                     st.download_button(
                         "Download Report",
-                        data=report_data.get("content", ""),
+                        data=str(report_data),
                         file_name=f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format}"
                     )
             else:

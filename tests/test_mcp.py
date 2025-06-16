@@ -64,14 +64,15 @@ class TestFleetPulseMCPClient:
         
         tool_names = [tool.name for tool in tools]
         expected_tools = [
-            "get_fleet_status",
-            "get_host_details", 
-            "get_update_history",
-            "get_pending_updates",
-            "schedule_updates",
-            "generate_fleet_report",
-            "get_system_metrics",
-            "check_package_info"
+            "health_check",
+            "list_hosts", 
+            "get_host_details",
+            "get_update_reports",
+            "get_host_reports",
+            "list_packages",
+            "get_package_details",
+            "get_fleet_statistics",
+            "search"
         ]
         
         for expected_tool in expected_tools:
@@ -79,9 +80,9 @@ class TestFleetPulseMCPClient:
     
     def test_get_tool(self, mcp_client):
         """Test getting a specific tool."""
-        tool = mcp_client.get_tool("get_fleet_status")
+        tool = mcp_client.get_tool("list_hosts")
         assert tool is not None
-        assert tool.name == "get_fleet_status"
+        assert tool.name == "list_hosts"
         
         # Test non-existent tool
         non_existent = mcp_client.get_tool("non_existent_tool")
@@ -95,12 +96,13 @@ class TestFleetPulseMCPClient:
         assert "not found" in result.error.lower()
     
     @pytest.mark.asyncio 
-    async def test_get_fleet_status_success(self, mcp_client):
-        """Test successful fleet status retrieval."""
+    async def test_list_hosts_success(self, mcp_client):
+        """Test successful hosts listing."""
         mock_response_data = {
-            "total_hosts": 10,
-            "online_hosts": 8,
-            "offline_hosts": 2
+            "hosts": [
+                {"hostname": "server01", "os": "Ubuntu 22.04", "last_update": "2024-01-01"},
+                {"hostname": "server02", "os": "CentOS 8", "last_update": "2024-01-02"}
+            ]
         }
         
         with patch('httpx.AsyncClient') as mock_client:
@@ -110,21 +112,21 @@ class TestFleetPulseMCPClient:
             
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
             
-            result = await mcp_client.execute_tool("get_fleet_status", {})
+            result = await mcp_client.execute_tool("list_hosts", {})
             
             assert result.success is True
             assert result.data == mock_response_data
             assert result.error is None
     
     @pytest.mark.asyncio
-    async def test_get_fleet_status_error(self, mcp_client):
-        """Test fleet status retrieval with error."""
+    async def test_list_hosts_error(self, mcp_client):
+        """Test hosts listing with error."""
         with patch('httpx.AsyncClient') as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 side_effect=httpx.RequestError("Connection failed")
             )
             
-            result = await mcp_client.execute_tool("get_fleet_status", {})
+            result = await mcp_client.execute_tool("list_hosts", {})
             
             assert result.success is False
             assert "Connection failed" in result.error
