@@ -353,10 +353,5 @@ async def get_mcp_client() -> FastMCPClient:
     """Get configured MCP client instance."""
     settings = get_settings()
     
-    if not settings.mcp_server_url and not settings.mcp_server_command:
-        logger.warning("No MCP server configured, using legacy REST API client")
-        # Fall back to legacy implementation
-        from .mcp_client import FleetPulseMCPClient
-        return FleetPulseMCPClient()
-    
+    # Always use FastMCPClient; do not fall back to legacy REST client
     return FastMCPClient()

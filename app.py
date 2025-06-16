@@ -13,15 +13,15 @@ from datetime import datetime
 
 # Core imports
 from config import GenAIProvider, get_settings, get_available_providers
-from config.prompts import get_system_prompt, get_prompt_descriptions
+from config.prompts import get_system_prompt
 from core.genai_manager import GenAIManager, ChatMessage
-from core.mcp_client import FleetPulseMCPClient
+from core.fastmcp_client import get_mcp_client
 from core.conversation import ConversationManager
 
 # UI imports
 from ui.components import (
     render_provider_selector, render_prompt_selector, render_chat_message,
-    render_mcp_tool_result, render_configuration_panel, render_conversation_sidebar,
+    render_configuration_panel, render_conversation_sidebar,
     render_welcome_screen, render_error_message, render_status_indicators
 )
 from ui.dashboard import FleetDashboard, run_dashboard_async
@@ -54,18 +54,20 @@ class FleetPulseChatbot:
         self.mcp_client = None
         self.conversation_manager = None
         self.fleet_dashboard = None
-        self._initialize_components()
+        # Async initialization for MCP client
+        asyncio.run(self._initialize_components())
     
-    def _initialize_components(self):
-        """Initialize core components."""
+    async def _initialize_components(self):
+        """Initialize core components (async for MCP)."""
         try:
             self.genai_manager = GenAIManager()
-            self.mcp_client = FleetPulseMCPClient()
+            # Use FastMCPClient via async factory
+            self.mcp_client = await get_mcp_client()
             self.conversation_manager = ConversationManager()
             self.fleet_dashboard = FleetDashboard()
             logger.info("Components initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize components: {e}")
+            logger.error("Failed to initialize components: %s", e)
             st.error(f"Initialization error: {e}")
     
     def _initialize_session_state(self):
@@ -190,7 +192,7 @@ class FleetPulseChatbot:
                 })
                 
             except ValidationError as e:
-                logger.warning(f"Parameter validation failed for {tool_name}: {e}")
+                logger.warning("Parameter validation failed for %s: %s", tool_name, e)
                 tool_results.append({
                     "name": tool_name,
                     "parameters": {},
@@ -199,7 +201,7 @@ class FleetPulseChatbot:
                     "error": str(e)
                 })
             except Exception as e:
-                logger.error(f"Tool execution failed for {tool_name}: {e}")
+                logger.error("Tool execution failed for %s: %s", tool_name, e)
                 tool_results.append({
                     "name": tool_name,
                     "parameters": {},
@@ -212,7 +214,7 @@ class FleetPulseChatbot:
     def _extract_tool_parameters(self, tool_name: str, message: str) -> Dict[str, Any]:
         """Extract parameters for tools from user message (enhanced)."""
         import re
-        from datetime import datetime, timedelta
+        # datetime already imported at top
         
         params = {}
         message_lower = message.lower()
@@ -360,7 +362,7 @@ class FleetPulseChatbot:
             return response
             
         except Exception as e:
-            logger.error(f"Error processing chat message: {e}")
+            logger.error("Error processing chat message: %s", e)
             return f"I apologize, but I encountered an error: {str(e)}"
     
     def _save_conversation_message(self, role: str, content: str):
@@ -481,7 +483,7 @@ class FleetPulseChatbot:
                 except Exception as e:
                     error_msg = f"I apologize, but I encountered an error: {str(e)}"
                     st.error(error_msg)
-                    logger.error(f"Error in chat processing: {e}")
+                    logger.error("Error in chat processing: %s", e)
     
     def _render_sidebar(self):
         """Render sidebar with configuration and conversation history."""
@@ -595,12 +597,12 @@ class FleetPulseChatbot:
                 if isinstance(tool_names, list):
                     return [{"name": tool_name, "keywords": ["ai_selected"]} for tool_name in tool_names]
             except json.JSONDecodeError:
-                logger.warning(f"Failed to parse AI tool selection response: {response}")
+                logger.warning("Failed to parse AI tool selection response: %s", response)
             
             return []
             
         except Exception as e:
-            logger.error(f"Error in AI-driven tool selection: {e}")
+            logger.error("Error in AI-driven tool selection: %s", e)
             # Fall back to keyword detection
             return await self._detect_tool_usage(user_message)
 
@@ -617,7 +619,7 @@ class FleetPulseChatbot:
             self._render_main_interface()
             
         except Exception as e:
-            logger.error(f"Application error: {e}")
+            logger.error("Application error: %s", e)
             render_error_message(
                 str(e),
                 "Please check your configuration and try refreshing the page."
@@ -632,7 +634,7 @@ def main():
         chatbot.run()
         
     except Exception as e:
-        logger.error(f"Failed to start application: {e}")
+        logger.error("Failed to start application: %s", e)
         st.error(f"Failed to start FleetPulse Chatbot: {e}")
         
         st.markdown("""
