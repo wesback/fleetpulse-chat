@@ -60,8 +60,8 @@ A comprehensive Streamlit application that serves as an intelligent chatbot for 
    git clone https://github.com/wesback/fleetpulse-chat.git
    cd fleetpulse-chat
    
-   # Configure environment
-   cp .env.example .env
+   # Create .env file if not present
+   cp .env.example .env  # If .env.example does not exist, create it based on README variables
    # Edit .env with your settings
    
    # Start services
@@ -79,6 +79,9 @@ A comprehensive Streamlit application that serves as an intelligent chatbot for 
      -e FLEETPULSE_API_URL=http://localhost:8000 \
      fleetpulse-chat
    ```
+
+   # Note: Ensure the images for 'fleetpulse-backend' and 'fleetpulse-mcp' are available (built locally or pulled from a registry).
+   # The default chat history database is 'fleetpulse_conversations.db' in the project root.
 
 ## ⚙️ Configuration
 
